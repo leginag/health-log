@@ -9,6 +9,11 @@
 <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0e1310">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="manifest" href="manifest.webmanifest">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Health Log">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 </head>
 <body>
 <title>Health Log</title>
@@ -411,6 +416,9 @@
   .data-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .f-err { color: var(--danger); font-size: 13px; margin: 6px 2px; }
   .f-ok { color: var(--accent-strong); font-size: 13px; margin: 6px 2px; }
+  .f-warn { color: var(--amber-ink); background: var(--amber-tint); border-radius: 10px; padding: 8px 12px; font-size: 13px; margin: 8px 0; line-height: 1.5; }
+  .addmiss { display: flex; gap: 9px; align-items: flex-start; font-size: 13.5px; color: var(--ink-2); margin: 10px 2px; line-height: 1.45; }
+  .addmiss input { width: 18px; height: 18px; flex: none; margin: 1px 0 0; accent-color: var(--accent); }
   .note { font-size: 12.5px; color: var(--muted); margin: 10px 4px 0; line-height: 1.5; }
   .confirm-import { padding: 14px; margin-top: 10px; background: var(--surface); }
   .confirm-import p { margin: 0 0 12px; font-size: 14px; color: var(--ink-2); }
@@ -623,6 +631,31 @@ function migrate(d) {
     };
   }
   if (!out.device) out.device = uid(); // stable per-phone id, used to bounce self-imports
+  if (!out.rev || out.rev < 3) {
+    // one-time move to the agreed default list — renames and reorders in place,
+    // keeps ids (so logged history survives), never deletes anything with data
+    var renames = { 'meds': 'Meds & Vitamins', 'meds & vitamins': 'Meds & Vitamins', 'exercise 30+ min': '30+ min Exercise', 'exercise': '30+ min Exercise' };
+    out.activities.forEach(function (a) {
+      var key = a.name.trim().toLowerCase();
+      if (renames[key]) a.name = renames[key];
+    });
+    out.activities = out.activities.filter(function (a) {
+      if (a.name.trim().toLowerCase() !== 'meditation') return true;
+      var used = false;
+      ['p1', 'p2'].forEach(function (pid) {
+        var logs = (out.logs && out.logs[pid]) || {};
+        for (var dk in logs) { if (logs[dk] && logs[dk][a.id] > 0) used = true; }
+      });
+      return used; // drop Meditation only if it was never logged
+    });
+    var order = ['situps', 'pushups', 'steps', 'meds & vitamins', 'sleep 7h+', '30+ min exercise', 'fruit & veg'];
+    out.activities.sort(function (x, y) {
+      var ix = order.indexOf(x.name.trim().toLowerCase()); if (ix < 0) ix = 99;
+      var iy = order.indexOf(y.name.trim().toLowerCase()); if (iy < 0) iy = 99;
+      return ix - iy;
+    });
+    out.rev = 3;
+  }
   return out;
 }
 function load() {
@@ -640,17 +673,17 @@ function seed() {
     activities: [
       { id: uid(), name: 'Situps',           emoji: '🤸', goal: 100,   step: 25 },
       { id: uid(), name: 'Pushups',          emoji: '💪', goal: 100,   step: 25 },
-      { id: uid(), name: 'Exercise 30+ min', emoji: '🏃', goal: 1,     step: 1 },
-      { id: uid(), name: 'Meditation',       emoji: '🧘', goal: 1,     step: 1 },
       { id: uid(), name: 'Steps',            emoji: '👣', goal: 10000, step: 1000 },
-      { id: uid(), name: 'Meds',             emoji: '💊', goal: 1,     step: 1 },
+      { id: uid(), name: 'Meds & Vitamins',  emoji: '💊', goal: 1,     step: 1 },
       { id: uid(), name: 'Sleep 7h+',        emoji: '😴', goal: 1,     step: 1 },
+      { id: uid(), name: '30+ min Exercise', emoji: '🏃', goal: 1,     step: 1 },
       { id: uid(), name: 'Fruit & veg',      emoji: '🥦', goal: 5,     step: 1 }
     ],
     profiles: [{ id: 'p1', name: 'Me' }, { id: 'p2', name: 'Partner' }],
     logs: { p1: {}, p2: {} },
     created: todayKey(),
-    device: uid()
+    device: uid(),
+    rev: 3
   };
 }
 
@@ -661,7 +694,7 @@ var renderedToday = todayKey();
 
 function byId(id) { for (var i = 0; i < db.activities.length; i++) if (db.activities[i].id === id) return db.activities[i]; return null; }
 function profile(pid) { for (var i = 0; i < db.profiles.length; i++) if (db.profiles[i].id === pid) return db.profiles[i]; return db.profiles[0]; }
-function pname(pid) { var n = profile(pid).name.trim(); return n || (pid === 'p1' ? 'Person A' : 'Person B'); }
+function pname(pid) { var n = profile(pid).name.trim(); return n || (pid === 'p1' ? 'You' : 'Partner'); }
 function plogs(pid) { if (!db.logs[pid]) db.logs[pid] = {}; return db.logs[pid]; }
 function countOf(pid, dateK, id) { var l = plogs(pid); return (l[dateK] && l[dateK][id]) || 0; }
 function setCount(pid, dateK, id, n) {
@@ -912,11 +945,11 @@ function vManage() {
 
   h += '<div class="h-label">Who\'s tracking</div><div class="name-grid">' +
     db.profiles.map(function (p, i) {
-      return '<div class="name-field' + (i === 1 ? ' p2n' : '') + '"><label for="pn-' + p.id + '"><span class="dotmark"></span>Person ' + (i === 1 ? 'B' : 'A') + '</label>' +
+      return '<div class="name-field' + (i === 1 ? ' p2n' : '') + '"><label for="pn-' + p.id + '"><span class="dotmark"></span>' + (i === 1 ? 'Accountability Partner' : 'You') + '</label>' +
         '<input class="f-input" id="pn-' + p.id + '" data-role="pname" data-id="' + p.id + '" maxlength="16" value="' + esc(p.name) + '" placeholder="' + (i === 1 ? 'Partner' : 'Me') + '" autocomplete="off"></div>';
     }).join('') + '</div>' +
     '<button class="btn btn-surface btn-add" data-act="swap-people">⇅ Swap the two people</button>' +
-    '<p class="note">Person A is whoever holds this phone — shared codes always carry A\'s column. If names and history ever end up on the wrong side, swap flips them back (tap again to undo).</p>';
+    '<p class="note">The “You” column belongs to whoever holds this device — shared codes always carry it. If names and history ever end up on the wrong side, swap flips them back (tap again to undo).</p>';
 
   h += '<div class="h-label">Activities</div><div class="acts">' +
     db.activities.map(function (a) {
@@ -1024,13 +1057,19 @@ function vSheet() {
       pr.days + ' day' + (pr.days === 1 ? '' : 's') + ', ' + pr.entries + ' entr' + (pr.entries === 1 ? 'y' : 'ies') + '. ' +
       'This fills those days in the <strong>' + esc(pname('p2')) + '</strong> column. Your own column isn\'t touched.</p>' +
       (pr.nameWarn ? '<div class="f-err">Heads up — this code says it\'s from “' + esc(pr.sender) + '”, but your partner column is named “' + esc(pname('p2')) + '”. Make sure it\'s the right person.</div>' : '') +
-      (pr.missed.length ? '<div class="f-err">No matching activity here for: ' + esc(pr.missed.join(', ')) + ' — those get skipped. (Names must match on both phones.)</div>' : '') +
-      (pr.days === 0 ? '<div class="f-err">Nothing in this code matches your activities, so there\'s nothing to add.</div>' : '') +
+      (pr.goalDiffs.length ? '<div class="f-warn">You two have different goals — ' +
+        pr.goalDiffs.map(function (g) { return esc(g.name) + ': theirs ' + fmtN(g.theirs) + ', yours ' + fmtN(g.mine); }).join(' · ') +
+        '. Worth agreeing on one number and setting it in Manage on both phones.</div>' : '') +
+      (pr.addable.length ? '<label class="addmiss"><input type="checkbox" id="f-addmissing" checked>' +
+        '<span>They track something this phone doesn\'t: <strong>' + esc(pr.addableNames.join(', ')) + '</strong>. ' +
+        'Add here too, so their ' + pr.addableEntries + ' entr' + (pr.addableEntries === 1 ? 'y' : 'ies') + ' come in.</span></label>' : '') +
+      (pr.unknown.length ? '<div class="f-err">No matching activity here for: ' + esc(pr.unknown.join(', ')) + ' — those get skipped. (Names must match on both phones.)</div>' : '') +
+      (pr.days === 0 && !pr.addable.length ? '<div class="f-err">Nothing in this code matches your activities, so there\'s nothing to add.</div>' : '') +
       '<div class="sheet-actions">' +
       '<button class="btn btn-ghost" data-act="paste-code">Back</button>' +
       '<span class="spacer"></span>' +
       '<button class="btn btn-ghost" data-act="close-sheet">Cancel</button>' +
-      (pr.days > 0 ? '<button class="btn btn-primary" data-act="commit-code">Add it</button>' : '') +
+      (pr.days > 0 || pr.addable.length ? '<button class="btn btn-primary" data-act="commit-code">Add it</button>' : '') +
       '</div>';
   } else if (s.type === 'paste') {
     inner = '<h2>Add partner\'s update</h2>' +
@@ -1192,7 +1231,7 @@ function buildShareCode() {
   // Codes ALWAYS carry this phone's own column (person A), never the imported
   // partner copy — so data can't ping-pong between phones or get mislabeled.
   var t = todayKey();
-  var days = {};
+  var days = {}, meta = {};
   for (var i = 0; i < 14; i++) {
     var k = addDays(t, -i);
     var day = plogs('p1')[k];
@@ -1200,11 +1239,15 @@ function buildShareCode() {
     var o = {};
     db.activities.forEach(function (a) {
       var c = day[a.id];
-      if (c > 0) o[a.name.trim().toLowerCase()] = c;
+      if (c > 0) {
+        var nm = a.name.trim().toLowerCase();
+        o[nm] = c;
+        meta[nm] = [a.emoji, a.goal, a.step, a.name]; // lets the other phone recreate it
+      }
     });
     if (Object.keys(o).length) days[k] = o;
   }
-  return 'HL1.' + b64e(JSON.stringify({ v: 1, n: pname('p1'), f: db.device, d: days }));
+  return 'HL1.' + b64e(JSON.stringify({ v: 1, n: pname('p1'), f: db.device, d: days, a: meta }));
 }
 
 function parseShareCode(text) {
@@ -1216,27 +1259,60 @@ function parseShareCode(text) {
   if (p.f && p.f === db.device) throw new Error('That\'s this phone\'s own code — send it to your partner, and paste the one they send back.');
   var nameMap = {};
   db.activities.forEach(function (a) { nameMap[a.name.trim().toLowerCase()] = a.id; });
-  var days = 0, entries = 0, missed = {};
+  var days = 0, entries = 0, missed = {}, missedEntries = {};
   Object.keys(p.d).forEach(function (dk) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dk)) return;
     var srcDay = p.d[dk];
     if (!srcDay || typeof srcDay !== 'object') return;
     var any = false;
     Object.keys(srcDay).forEach(function (nm) {
-      if (nameMap[String(nm).trim().toLowerCase()]) { entries++; any = true; }
-      else { missed[nm] = 1; }
+      var key = String(nm).trim().toLowerCase();
+      if (nameMap[key]) { entries++; any = true; }
+      else { missed[key] = 1; missedEntries[key] = (missedEntries[key] || 0) + 1; }
     });
     if (any) days++;
+  });
+  // split unmatched into "addable" (code carries the activity's details) vs unknown
+  var addable = [], unknown = [], addableEntries = 0;
+  Object.keys(missed).forEach(function (nm) {
+    if (p.a && p.a[nm]) { addable.push(nm); addableEntries += missedEntries[nm]; }
+    else { unknown.push(nm); }
   });
   var sender = p.n ? String(p.n).slice(0, 16).trim() : '';
   var curP2 = pname('p2');
   var nameWarn = !!(sender && sender !== 'Me' && curP2 !== 'Partner' && sender.toLowerCase() !== curP2.toLowerCase());
-  return { payload: p, sender: sender, days: days, entries: entries, missed: Object.keys(missed), nameWarn: nameWarn };
+  // flag goal differences on matched activities so the pair can re-align
+  var goalDiffs = [];
+  if (p.a) {
+    Object.keys(p.a).forEach(function (nm) {
+      var id = nameMap[nm];
+      if (!id) return;
+      var mine = byId(id);
+      var theirs = clampInt(p.a[nm][1], 1, 999999, 0);
+      if (mine && theirs && theirs !== mine.goal) goalDiffs.push({ name: mine.name, theirs: theirs, mine: mine.goal });
+    });
+  }
+  var addableNames = addable.map(function (nm) { return (p.a && p.a[nm] && p.a[nm][3]) ? String(p.a[nm][3]) : nm; });
+  return { payload: p, sender: sender, days: days, entries: entries, addable: addable, addableNames: addableNames, addableEntries: addableEntries, unknown: unknown, nameWarn: nameWarn, goalDiffs: goalDiffs };
 }
 
-function commitShareCode(parsed) {
+function commitShareCode(parsed, addMissing) {
   // Writes ONLY into the partner column (p2); person A's data is never touched.
   var p = parsed.payload;
+  if (addMissing && p.a) {
+    parsed.addable.forEach(function (nm) {
+      var m2 = p.a[nm];
+      if (!m2) return;
+      db.activities.push({
+        id: uid(),
+        name: String(m2[3] || nm).slice(0, 24),
+        emoji: String(m2[0] || '✅').slice(0, 8),
+        goal: clampInt(m2[1], 1, 999999, 1),
+        step: clampInt(m2[2], 1, 99999, 1)
+      });
+    });
+    save();
+  }
   var nameMap = {};
   db.activities.forEach(function (a) { nameMap[a.name.trim().toLowerCase()] = a.id; });
   Object.keys(p.d).forEach(function (dk) {
@@ -1460,9 +1536,12 @@ document.addEventListener('click', function (ev) {
     case 'commit-code': {
       var pr2 = view.sheet && view.sheet.parsed;
       if (!pr2) break;
-      commitShareCode(pr2);
+      var addBox = document.getElementById('f-addmissing');
+      var addM = !!(addBox && addBox.checked);
+      commitShareCode(pr2, addM);
       view.sheet = null;
-      view.syncMsg = 'Added ' + (pr2.sender || pname('p2')) + '\'s update — ' + pr2.days + ' day' + (pr2.days === 1 ? '' : 's') + ' of logs.';
+      view.syncMsg = 'Added ' + (pr2.sender || pname('p2')) + '\'s update' +
+        (addM && pr2.addable.length ? ', plus ' + pr2.addable.length + ' new activit' + (pr2.addable.length === 1 ? 'y' : 'ies') : '') + '.';
       render();
       toast('Partner update added');
       break;
