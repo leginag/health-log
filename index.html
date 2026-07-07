@@ -607,17 +607,23 @@ function save() {
   catch (e) { storageOK = false; }
 }
 function migrate(d) {
-  if (d.version === 2 && d.profiles && d.logs && d.logs.p1) return d;
-  // v1 shape: {activities, logs, created}
-  return {
-    version: 2,
-    activities: (d.activities || []).map(function (a) {
-      return { id: String(a.id || uid()), name: String(a.name || 'Activity').slice(0, 24), emoji: String(a.emoji || '✅').slice(0, 8), goal: clampInt(a.goal, 1, 999999, 1), step: clampInt(a.step, 1, 99999, 1) };
-    }),
-    profiles: [{ id: 'p1', name: 'Me' }, { id: 'p2', name: 'Partner' }],
-    logs: { p1: (d.logs && typeof d.logs === 'object') ? d.logs : {}, p2: {} },
-    created: typeof d.created === 'string' ? d.created : todayKey()
-  };
+  var out;
+  if (d.version === 2 && d.profiles && d.logs && d.logs.p1) {
+    out = d;
+  } else {
+    // v1 shape: {activities, logs, created}
+    out = {
+      version: 2,
+      activities: (d.activities || []).map(function (a) {
+        return { id: String(a.id || uid()), name: String(a.name || 'Activity').slice(0, 24), emoji: String(a.emoji || '✅').slice(0, 8), goal: clampInt(a.goal, 1, 999999, 1), step: clampInt(a.step, 1, 99999, 1) };
+      }),
+      profiles: [{ id: 'p1', name: 'Me' }, { id: 'p2', name: 'Partner' }],
+      logs: { p1: (d.logs && typeof d.logs === 'object') ? d.logs : {}, p2: {} },
+      created: typeof d.created === 'string' ? d.created : todayKey()
+    };
+  }
+  if (!out.device) out.device = uid(); // stable per-phone id, used to bounce self-imports
+  return out;
 }
 function load() {
   try {
@@ -643,7 +649,8 @@ function seed() {
     ],
     profiles: [{ id: 'p1', name: 'Me' }, { id: 'p2', name: 'Partner' }],
     logs: { p1: {}, p2: {} },
-    created: todayKey()
+    created: todayKey(),
+    device: uid()
   };
 }
 
@@ -895,7 +902,7 @@ function vCompare() {
     '<button class="btn btn-surface" data-act="paste-code">Add partner\'s update</button>' +
     '</div>';
   if (view.syncMsg) h += '<div class="f-ok">' + esc(view.syncMsg) + '</div>';
-  h += '<p class="sync-note">Each phone keeps its own log. <strong>Share my update</strong> makes a small code with your last 14 days — send it over WhatsApp or anything. Your partner taps <strong>Add partner\'s update</strong>, pastes it, and you appear in their Compare tab (and they in yours, the same way).</p>';
+  h += '<p class="sync-note">Each phone keeps its own log, and mix-ups can\'t happen by design: <strong>Share my update</strong> always carries <em>your</em> column (' + esc(n1) + ') no matter which view you\'re on, pasting a code only ever fills the <em>' + esc(n2) + '</em> column — never yours — and this phone\'s own codes won\'t import back into it. Before anything is saved you\'ll see who the code is from and how many days it changes.</p>';
 
   return h;
 }
@@ -907,7 +914,9 @@ function vManage() {
     db.profiles.map(function (p, i) {
       return '<div class="name-field' + (i === 1 ? ' p2n' : '') + '"><label for="pn-' + p.id + '"><span class="dotmark"></span>Person ' + (i === 1 ? 'B' : 'A') + '</label>' +
         '<input class="f-input" id="pn-' + p.id + '" data-role="pname" data-id="' + p.id + '" maxlength="16" value="' + esc(p.name) + '" placeholder="' + (i === 1 ? 'Partner' : 'Me') + '" autocomplete="off"></div>';
-    }).join('') + '</div>';
+    }).join('') + '</div>' +
+    '<button class="btn btn-surface btn-add" data-act="swap-people">⇅ Swap the two people</button>' +
+    '<p class="note">Person A is whoever holds this phone — shared codes always carry A\'s column. If names and history ever end up on the wrong side, swap flips them back (tap again to undo).</p>';
 
   h += '<div class="h-label">Activities</div><div class="acts">' +
     db.activities.map(function (a) {
@@ -998,7 +1007,7 @@ function vSheet() {
 
   if (s.type === 'share') {
     inner = '<h2>Share my update</h2>' +
-      '<p class="sub sheet-sub">' + esc(pname(view.person)) + '\'s last 14 days, as a code. Send it to your partner any way you like.</p>' +
+      '<p class="sub sheet-sub"><strong>' + esc(pname('p1')) + '</strong>\'s last 14 days, as a code — sharing always sends this phone\'s own column, whichever view you\'re on. Send it to your partner any way you like.</p>' +
       '<textarea class="paste-box" id="f-code" readonly rows="4">' + esc(s.code) + '</textarea>' +
       '<div class="sheet-actions">' +
       '<span class="spacer"></span>' +
@@ -1008,15 +1017,30 @@ function vSheet() {
       '</div>';
   }
 
-  if (s.type === 'paste') {
+  if (s.type === 'paste' && s.stage === 'ready') {
+    var pr = s.parsed;
     inner = '<h2>Add partner\'s update</h2>' +
-      '<p class="sub sheet-sub">Paste the code they sent you — their days fill the ' + esc(pname('p2')) + ' column.</p>' +
+      '<p class="sub sheet-sub">From <strong>' + esc(pr.sender || 'unnamed') + '</strong> — ' +
+      pr.days + ' day' + (pr.days === 1 ? '' : 's') + ', ' + pr.entries + ' entr' + (pr.entries === 1 ? 'y' : 'ies') + '. ' +
+      'This fills those days in the <strong>' + esc(pname('p2')) + '</strong> column. Your own column isn\'t touched.</p>' +
+      (pr.nameWarn ? '<div class="f-err">Heads up — this code says it\'s from “' + esc(pr.sender) + '”, but your partner column is named “' + esc(pname('p2')) + '”. Make sure it\'s the right person.</div>' : '') +
+      (pr.missed.length ? '<div class="f-err">No matching activity here for: ' + esc(pr.missed.join(', ')) + ' — those get skipped. (Names must match on both phones.)</div>' : '') +
+      (pr.days === 0 ? '<div class="f-err">Nothing in this code matches your activities, so there\'s nothing to add.</div>' : '') +
+      '<div class="sheet-actions">' +
+      '<button class="btn btn-ghost" data-act="paste-code">Back</button>' +
+      '<span class="spacer"></span>' +
+      '<button class="btn btn-ghost" data-act="close-sheet">Cancel</button>' +
+      (pr.days > 0 ? '<button class="btn btn-primary" data-act="commit-code">Add it</button>' : '') +
+      '</div>';
+  } else if (s.type === 'paste') {
+    inner = '<h2>Add partner\'s update</h2>' +
+      '<p class="sub sheet-sub">Paste the code they sent you. You\'ll see who it\'s from and what it changes before anything is saved.</p>' +
       '<textarea class="paste-box" id="f-paste" rows="4" placeholder="HL1.…"></textarea>' +
       (s.err ? '<div class="f-err">' + esc(s.err) + '</div>' : '') +
       '<div class="sheet-actions">' +
       '<span class="spacer"></span>' +
       '<button class="btn btn-ghost" data-act="close-sheet">Cancel</button>' +
-      '<button class="btn btn-primary" data-act="apply-code">Add it</button>' +
+      '<button class="btn btn-primary" data-act="check-code">Check code</button>' +
       '</div>';
   }
 
@@ -1165,12 +1189,13 @@ function normalizeImport(obj) {
 
 /* ── partner share codes ─────────────────────────────────────────────── */
 function buildShareCode() {
-  var pid = view.person;
+  // Codes ALWAYS carry this phone's own column (person A), never the imported
+  // partner copy — so data can't ping-pong between phones or get mislabeled.
   var t = todayKey();
   var days = {};
   for (var i = 0; i < 14; i++) {
     var k = addDays(t, -i);
-    var day = plogs(pid)[k];
+    var day = plogs('p1')[k];
     if (!day) continue;
     var o = {};
     db.activities.forEach(function (a) {
@@ -1179,37 +1204,57 @@ function buildShareCode() {
     });
     if (Object.keys(o).length) days[k] = o;
   }
-  return 'HL1.' + b64e(JSON.stringify({ v: 1, n: pname(pid), d: days }));
+  return 'HL1.' + b64e(JSON.stringify({ v: 1, n: pname('p1'), f: db.device, d: days }));
 }
 
-function applyShareCode(text) {
+function parseShareCode(text) {
   var m = String(text).match(/HL1\.([A-Za-z0-9+\/=]+)/);
   if (!m) throw new Error('That doesn\'t look like a Health Log code.');
   var p;
   try { p = JSON.parse(b64d(m[1])); } catch (e) { throw new Error('That code is damaged — ask them to share it again.'); }
   if (!p || typeof p.d !== 'object' || !p.d) throw new Error('That code is damaged — ask them to share it again.');
+  if (p.f && p.f === db.device) throw new Error('That\'s this phone\'s own code — send it to your partner, and paste the one they send back.');
   var nameMap = {};
   db.activities.forEach(function (a) { nameMap[a.name.trim().toLowerCase()] = a.id; });
-  var missed = {}, days = 0;
+  var days = 0, entries = 0, missed = {};
   Object.keys(p.d).forEach(function (dk) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dk)) return;
     var srcDay = p.d[dk];
     if (!srcDay || typeof srcDay !== 'object') return;
-    var wrote = false;
+    var any = false;
+    Object.keys(srcDay).forEach(function (nm) {
+      if (nameMap[String(nm).trim().toLowerCase()]) { entries++; any = true; }
+      else { missed[nm] = 1; }
+    });
+    if (any) days++;
+  });
+  var sender = p.n ? String(p.n).slice(0, 16).trim() : '';
+  var curP2 = pname('p2');
+  var nameWarn = !!(sender && sender !== 'Me' && curP2 !== 'Partner' && sender.toLowerCase() !== curP2.toLowerCase());
+  return { payload: p, sender: sender, days: days, entries: entries, missed: Object.keys(missed), nameWarn: nameWarn };
+}
+
+function commitShareCode(parsed) {
+  // Writes ONLY into the partner column (p2); person A's data is never touched.
+  var p = parsed.payload;
+  var nameMap = {};
+  db.activities.forEach(function (a) { nameMap[a.name.trim().toLowerCase()] = a.id; });
+  Object.keys(p.d).forEach(function (dk) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dk)) return;
+    var srcDay = p.d[dk];
+    if (!srcDay || typeof srcDay !== 'object') return;
     Object.keys(srcDay).forEach(function (nm) {
       var id = nameMap[String(nm).trim().toLowerCase()];
-      if (!id) { missed[nm] = 1; return; }
+      if (!id) return;
       var n = clampInt(srcDay[nm], 0, 999999, 0);
-      if (n > 0) { setCount('p2', dk, id, n); wrote = true; }
+      if (n > 0) setCount('p2', dk, id, n);
     });
-    if (wrote) days++;
   });
   // adopt the sender's name for the partner slot, unless they never set one
-  if (p.n && String(p.n).trim() && String(p.n).trim() !== 'Me') {
-    profile('p2').name = String(p.n).slice(0, 16);
+  if (parsed.sender && parsed.sender !== 'Me') {
+    profile('p2').name = parsed.sender;
     save();
   }
-  return { days: days, missed: Object.keys(missed) };
 }
 
 /* ── editor actions ──────────────────────────────────────────────────── */
@@ -1391,7 +1436,7 @@ document.addEventListener('click', function (ev) {
     case 'native-share': {
       var codeEl2 = document.getElementById('f-code');
       if (codeEl2 && navigator.share) {
-        navigator.share({ text: 'Health Log update from ' + pname(view.person) + ':\n' + codeEl2.value }).catch(function () {});
+        navigator.share({ text: 'Health Log update from ' + pname('p1') + ':\n' + codeEl2.value }).catch(function () {});
       }
       break;
     }
@@ -1400,20 +1445,38 @@ document.addEventListener('click', function (ev) {
       render();
       focusEl('f-paste', false);
       break;
-    case 'apply-code': {
+    case 'check-code': {
       var pb = document.getElementById('f-paste');
       try {
-        var res = applyShareCode(pb ? pb.value : '');
-        view.sheet = null;
-        view.syncMsg = 'Added ' + pname('p2') + '\'s update — ' + res.days + ' day' + (res.days === 1 ? '' : 's') + ' of logs' +
-          (res.missed.length ? '. No matching activity for: ' + res.missed.join(', ') : '.');
+        view.sheet = { type: 'paste', stage: 'ready', parsed: parseShareCode(pb ? pb.value : '') };
         render();
-        toast('Partner update added');
       } catch (e) {
         view.sheet.err = e.message;
         render();
         focusEl('f-paste', false);
       }
+      break;
+    }
+    case 'commit-code': {
+      var pr2 = view.sheet && view.sheet.parsed;
+      if (!pr2) break;
+      commitShareCode(pr2);
+      view.sheet = null;
+      view.syncMsg = 'Added ' + (pr2.sender || pname('p2')) + '\'s update — ' + pr2.days + ' day' + (pr2.days === 1 ? '' : 's') + ' of logs.';
+      render();
+      toast('Partner update added');
+      break;
+    }
+    case 'swap-people': {
+      var tn = db.profiles[0].name;
+      db.profiles[0].name = db.profiles[1].name;
+      db.profiles[1].name = tn;
+      var tl = db.logs.p1;
+      db.logs.p1 = db.logs.p2;
+      db.logs.p2 = tl;
+      save();
+      render();
+      toast('Swapped — ' + pname('p1') + ' is now the first column');
       break;
     }
     case 'export-json':
