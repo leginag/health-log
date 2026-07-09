@@ -377,6 +377,14 @@
   .wk2-head span { width: 15px; text-align: center; font-size: 10.5px; font-weight: 600; color: var(--muted); }
   .wk2-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
   .wk2-row .pchip { width: 72px; }
+  .wk2 .dot { cursor: pointer; }
+  .dot-sel { box-shadow: 0 0 0 2px var(--surface), 0 0 0 3.5px var(--accent-strong); }
+  .cmp-nav { margin: 4px 0 10px; }
+  .cmp-nav h1 { font-size: 20px; }
+  .cmp-daysum { display: flex; gap: 8px; align-items: center; margin: 0 2px 12px; flex-wrap: wrap; }
+  .cmp-daysum .pchip { max-width: none; }
+  .both-badge { font-size: 12px; font-weight: 700; color: var(--amber-ink); background: var(--amber-tint); border-radius: 99px; padding: 3px 9px; }
+  .wk2-hint { font-size: 12px; color: var(--muted); text-align: center; margin: 10px 4px 0; }
   .sync-note { font-size: 12.5px; color: var(--muted); margin: 10px 4px 0; line-height: 1.5; }
 
   /* ── manage ──────────────────────────────────────────────────────────── */
@@ -689,7 +697,7 @@ function seed() {
 
 /* ── state ───────────────────────────────────────────────────────────── */
 var db = load() || seed();
-var view = { tab: 'today', date: todayKey(), person: 'p1', sheet: null, confirmErase: false, pendingImport: null, importErr: null, syncMsg: null, pop: null };
+var view = { tab: 'today', date: todayKey(), cmpDate: todayKey(), person: 'p1', sheet: null, confirmErase: false, pendingImport: null, importErr: null, syncMsg: null, pop: null };
 var renderedToday = todayKey();
 
 function byId(id) { for (var i = 0; i < db.activities.length; i++) if (db.activities[i].id === id) return db.activities[i]; return null; }
@@ -885,11 +893,24 @@ function vCompare() {
     '<div class="tile card"><div class="tile-v">' + pd2 + '</div><div class="tile-l">Perfect days</div><div class="tile-s">' + esc(n2) + '</div></div>' +
     '</div>';
 
-  // today, side by side
-  h += '<div class="h-label">Today, side by side</div><div class="acts">';
+  // side by side — navigable to any day
+  var ck = view.cmpDate || t;
+  var cm1 = metCount('p1', ck), cm2 = metCount('p2', ck);
+  h += '<div class="h-label">Side by side</div>';
+  h += '<header class="datebar cmp-nav">' +
+    '<button class="nav-btn" data-act="cmp-prev" aria-label="Previous day">' + SVG_PREV + '</button>' +
+    '<div class="datebar-t"><h1>' + relLabel(ck) + '</h1><div class="sub">' + fmtDate(ck) + '</div></div>' +
+    '<button class="nav-btn" data-act="cmp-next" ' + (ck === t ? 'disabled' : '') + ' aria-label="Next day">' + SVG_NEXT + '</button>' +
+    '</header>';
+  h += '<div class="cmp-daysum">' +
+    '<span class="pchip">' + esc(n1) + ' · ' + cm1 + '/' + acts.length + '</span>' +
+    '<span class="pchip p2c">' + esc(n2) + ' · ' + cm2 + '/' + acts.length + '</span>' +
+    (cm1 === acts.length && cm2 === acts.length ? '<span class="both-badge">both perfect 🤝</span>' : '') +
+    '</div>';
+  h += '<div class="acts">';
   h += acts.map(function (a) {
     function row(pid, cls, chipCls, checkCls) {
-      var c = countOf(pid, t, a.id);
+      var c = countOf(pid, ck, a.id);
       var done = c >= a.goal;
       var pct = Math.min(100, Math.round(c / a.goal * 100));
       return '<div class="cmp-row">' +
@@ -922,11 +943,12 @@ function vCompare() {
       var dk2 = addDays(t, -w);
       var m = metCount(pid, dk2);
       var cls = (db.activities.length && m === db.activities.length) ? 'dot-met ' + dotCls : (m > 0 ? 'dot-part ' + dotCls : 'dot-none');
-      r += '<i class="dot ' + cls + (dk2 === t ? ' dot-today' : '') + '" title="' + esc(pname(pid)) + ' · ' + fmtDate(dk2) + ': ' + m + '/' + db.activities.length + ' goals"></i>';
+      r += '<button class="dot ' + cls + (dk2 === t ? ' dot-today' : '') + (dk2 === ck ? ' dot-sel' : '') + '" data-act="cmp-jump" data-date="' + dk2 + '" aria-label="' + esc(pname(pid)) + ' · ' + fmtDate(dk2) + ': ' + m + ' of ' + db.activities.length + ' goals — tap to compare this day"></button>';
     }
     return r + '</div></div>';
   }
   h += '<div class="wk2 card">' + head + wkRow('p1', '', '') + wkRow('p2', 'p2c', 'p2d') + '</div>';
+  h += '<p class="wk2-hint">Tap any day to see it broken down above.</p>';
 
   // sync
   h += '<div class="h-label">Different phones? Stay in sync</div>' +
@@ -1408,6 +1430,7 @@ document.addEventListener('click', function (ev) {
   switch (act) {
     case 'tab':
       view.tab = b.dataset.tab;
+      if (view.tab === 'compare') view.cmpDate = todayKey(); // open Compare on today
       view.confirmErase = false;
       view.importErr = null;
       view.syncMsg = null;
@@ -1424,6 +1447,17 @@ document.addEventListener('click', function (ev) {
       break;
     case 'next':
       if (view.date !== todayKey()) { view.date = addDays(view.date, 1); render(); }
+      break;
+    case 'cmp-prev':
+      view.cmpDate = addDays(view.cmpDate || todayKey(), -1);
+      render();
+      break;
+    case 'cmp-next':
+      if (view.cmpDate !== todayKey()) { view.cmpDate = addDays(view.cmpDate || todayKey(), 1); render(); }
+      break;
+    case 'cmp-jump':
+      view.cmpDate = b.dataset.date;
+      render();
       break;
     case 'inc': {
       var a1 = byId(id);
@@ -1630,6 +1664,7 @@ document.addEventListener('keydown', function (ev) {
 document.addEventListener('visibilitychange', function () {
   if (!document.hidden && todayKey() !== renderedToday) {
     if (view.date === renderedToday) view.date = todayKey();
+    if (view.cmpDate === renderedToday) view.cmpDate = todayKey();
     render();
   }
 });
