@@ -328,6 +328,13 @@
     border-top: 1px solid var(--hairline);
   }
   .trend-row:first-of-type { border-top: 0; }
+  .trend-head { padding: 0 0 3px; border-top: 0 !important; }
+  .cell-lab {
+    text-align: center;
+    font-size: 9px; font-weight: 700;
+    color: var(--muted);
+    white-space: nowrap; overflow: hidden;
+  }
   .trend-name { font-size: 12px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .cells { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
   .cellpair { display: flex; flex-direction: column; gap: 2px; }
@@ -933,10 +940,10 @@ function vToday() {
   h += segHTML();
 
   h += '<div class="chips-row">' +
-    '<span class="chip rank" style="--rc:' + rk.c + '">★ ' + rk.l + ' · ' + rk.n + '</span>' +
+    '<button class="chip rank" style="--rc:' + rk.c + '" data-act="rank-info" aria-label="Rank ' + rk.l + ', ' + rk.n + ' — tap to see how ranks work">★ ' + rk.l + ' · ' + rk.n + '</button>' +
     (arc > 0
-      ? '<span class="chip arc">🔥 Day ' + arc + (arc === 1 ? ' — arc begins' : ' of the arc') + '</span>'
-      : '<span class="chip arc dim">Start a new arc today</span>') +
+      ? '<button class="chip arc" data-act="arc-info" aria-label="Day ' + arc + ' of the arc — tap to see how arcs work">🔥 Day ' + arc + (arc === 1 ? ' — arc begins' : ' of the arc') + '</button>'
+      : '<button class="chip arc dim" data-act="arc-info" aria-label="No arc running — tap to see how arcs work">Start a new arc today</button>') +
     '</div>';
 
   if (!acts.length) {
@@ -1007,7 +1014,7 @@ function vCompare() {
         '</button>';
     }).join('') + '</div>' +
     '<div class="wk-lab">' + weeks.map(function (ws) {
-      var lab = weekComplete(ws) || weekElapsed(ws) === 7 ? fmtShort(ws) : 'This wk';
+      var lab = weekComplete(ws) ? fmtShort(ws) : 'This wk';
       return '<button class="' + (ws === view.cmpWeek ? 'sel' : '') + '" data-act="cmp-week" data-date="' + ws + '">' + lab + '</button>';
     }).join('') + '</div></div>';
 
@@ -1017,6 +1024,10 @@ function vCompare() {
     return (who === 'p1' ? 'y' : 'r') + lv + (flagged ? ' miss' : '');
   }
   h += '<div class="cmp-card card"><h3>By quest · days hit per week</h3>';
+  h += '<div class="trend-row trend-head"><div></div><div class="cells">' +
+    weeks.map(function (ws) {
+      return '<span class="cell-lab">' + (weekComplete(ws) ? fmtShort(ws) : 'This wk') + '</span>';
+    }).join('') + '</div></div>';
   h += acts.map(function (a) {
     return '<div class="trend-row"><div class="trend-name">' + a.emoji + ' ' + esc(a.name) + '</div>' +
       '<div class="cells">' + weeks.map(function (ws) {
@@ -1118,7 +1129,7 @@ function vCrew() {
   h += '<div class="h-label">Who\'s challenging</div><div class="name-grid">' +
     db.profiles.map(function (p, i) {
       return '<div class="name-field' + (i === 1 ? ' p2n' : '') + '"><label for="pn-' + p.id + '"><span class="dotmark"></span>' + (i === 1 ? 'Your rival' : 'You') + '</label>' +
-        '<input class="f-input" id="pn-' + p.id + '" data-role="pname" data-id="' + p.id + '" maxlength="16" value="' + esc(p.name) + '" placeholder="' + (i === 1 ? 'Partner' : 'Me') + '" autocomplete="off"></div>';
+        '<input class="f-input" id="pn-' + p.id + '" data-role="pname" data-id="' + p.id + '" maxlength="18" value="' + esc(p.name) + '" placeholder="' + (i === 1 ? 'Partner' : 'Me') + '" autocomplete="off"></div>';
     }).join('') + '</div>' +
     '<button class="btn btn-surface btn-add" data-act="swap-people">⇅ Swap the two people</button>' +
     '<p class="note">The “You” column belongs to whoever holds this device — shared codes always carry it. If names and history ever end up on the wrong side, swap flips them back (tap again to undo).</p>';
@@ -1214,6 +1225,36 @@ function vSheet() {
       '<button class="btn btn-ghost" data-act="close-sheet">Cancel</button>' +
       '<button class="btn btn-primary" data-act="save-edit">Save</button>' +
       '</div>';
+  }
+
+  if (s.type === 'ranks') {
+    var rkMe = rankOf(view.person);
+    inner = '<h2>★ The rank ladder</h2>' +
+      '<p class="sub sheet-sub">' + esc(pname(view.person)) + ' is <strong>' + rkMe.l + ' · ' + rkMe.n + '</strong> right now.</p>' +
+      '<div class="ladder card">' +
+      RANKS.map(function (r) {
+        return '<div class="ladder-row' + (r === rkMe ? ' me' : '') + '" style="--rc:' + r.c + '">' +
+          '<span class="rl">' + r.l + '</span>' +
+          '<span class="ladder-name">' + r.n + (r === rkMe ? ' · ' + esc(pname(view.person)) : '') + '</span>' +
+          '<span class="ladder-req">' + r.req + '</span></div>';
+      }).join('') + '</div>' +
+      '<p class="note">Your rank looks at the last 4 weeks: every quest completed on a day counts, out of everything you could have completed. Hit half of them and you\'re a Challenger; keep climbing from there. S-Legend is different — it takes 21 perfect days in a row (every quest, every day).</p>' +
+      '<p class="note">Ranks aren\'t permanent: ease off for a couple of weeks and you\'ll slide back down the ladder. That\'s the challenge.</p>' +
+      '<div class="sheet-actions"><span class="spacer"></span>' +
+      '<button class="btn btn-primary" data-act="close-sheet">Got it</button></div>';
+  }
+
+  if (s.type === 'arc') {
+    var arcN = arcStreak(view.person);
+    inner = '<h2>🔥 Training arcs</h2>' +
+      '<p class="sub sheet-sub">' + esc(pname(view.person)) + (arcN > 0
+        ? ' is on <strong>day ' + arcN + '</strong> of the current arc.'
+        : ' has no arc running — today can be day 1.') + '</p>' +
+      '<p class="note" style="margin-top:0">An arc is your streak: <strong>consecutive days where you completed at least one quest</strong>. Any quest keeps it alive — it doesn\'t have to be a perfect day.</p>' +
+      '<p class="note">A day with nothing completed ends the arc. Today gets grace, though: the arc only counts as broken once the day is over, so you have until midnight to keep it going.</p>' +
+      '<p class="note">“Start a new arc” just means no streak is running right now — complete any quest today and you\'re back on day 1. Long arcs are how ranks climb, and 21 perfect days in a row is the road to S-Legend.</p>' +
+      '<div class="sheet-actions"><span class="spacer"></span>' +
+      '<button class="btn btn-primary" data-act="close-sheet">Got it</button></div>';
   }
 
   if (s.type === 'set') {
@@ -1413,7 +1454,7 @@ function normalizeImport(obj) {
   var profiles = [{ id: 'p1', name: 'Me' }, { id: 'p2', name: 'Partner' }];
   if (Array.isArray(src.profiles)) {
     src.profiles.forEach(function (p, i) {
-      if (i < 2 && p && p.name) profiles[i].name = String(p.name).slice(0, 16);
+      if (i < 2 && p && p.name) profiles[i].name = String(p.name).slice(0, 18);
     });
   }
   var logs;
@@ -1477,7 +1518,7 @@ function parseShareCode(text) {
     if (p.a && p.a[nm]) { addable.push(nm); addableEntries += missedEntries[nm]; }
     else { unknown.push(nm); }
   });
-  var sender = p.n ? String(p.n).slice(0, 16).trim() : '';
+  var sender = p.n ? String(p.n).slice(0, 18).trim() : '';
   var curP2 = pname('p2');
   var nameWarn = !!(sender && sender !== 'Me' && curP2 !== 'Partner' && sender.toLowerCase() !== curP2.toLowerCase());
   // flag goal differences on matched activities so the pair can re-align
@@ -1627,6 +1668,14 @@ document.addEventListener('click', function (ev) {
       break;
     case 'cmp-week':
       view.cmpWeek = b.dataset.date;
+      render();
+      break;
+    case 'rank-info':
+      view.sheet = { type: 'ranks' };
+      render();
+      break;
+    case 'arc-info':
+      view.sheet = { type: 'arc' };
       render();
       break;
     case 'inc': {
@@ -1812,7 +1861,7 @@ document.addEventListener('input', function (ev) {
   var i = ev.target;
   if (i && i.dataset && i.dataset.role === 'pname') {
     var p = profile(i.dataset.id);
-    p.name = i.value.slice(0, 16);
+    p.name = i.value.slice(0, 18);
     save(); // no re-render while typing — other views pick the name up next render
   }
 });
