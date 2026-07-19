@@ -1,12 +1,12 @@
 {
-  "name": "Health Log",
-  "short_name": "Health Log",
-  "description": "Two-person daily health tracker — data stays on your device",
+  "name": "Health Challenge",
+  "short_name": "Challenge",
+  "description": "Two-player daily health challenge — quests, power-ups and an accountability rival. Data stays on your device",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
-  "background_color": "#f1f4f0",
-  "theme_color": "#1c8158",
+  "background_color": "#0f1226",
+  "theme_color": "#12152b",
   "icons": [
     { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
     { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }

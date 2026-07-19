@@ -1,5 +1,5 @@
-// Health Log service worker — network-first with offline fallback.
-var CACHE = 'healthlog-pages-v1';
+// Health Challenge service worker — network-first with offline fallback.
+var CACHE = 'healthchallenge-v2';
 
 self.addEventListener('install', function () {
   self.skipWaiting();
